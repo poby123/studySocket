@@ -1,97 +1,96 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
-#include<unistd.h>
-#include<signal.h>
-#include<arpa/inet.h>
-#include<sys/wait.h>
-#include<sys/socket.h>
+#include <arpa/inet.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define BUF_SIZE 20
 void error_handling(const char*);
-void read_childproc(int);
+void read_child_proccess(int);
 
-int main(int argc, char *argv[]) {
-    int serv_sock, clnt_sock;
-    struct sockaddr_in serv_adr, clnt_adr;
+int main(int argc, char* argv[]) {
+  if (argc != 2) {
+    printf("Usage : %s <port> \n", argv[0]);
+    exit(1);
+  }
 
-    pid_t pid;
-    struct sigaction act;
-    socklen_t adr_sz;
-    int strlen, state;
+  struct sigaction action;
+  action.sa_handler = read_child_proccess;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = 0;
+
+  sigaction(SIGCHLD, &action, 0);
+
+  int serv_sock = socket(PF_INET, SOCK_STREAM, 0);
+  struct sockaddr_in server_address;
+
+  memset(&server_address, 0, sizeof(server_address));
+  server_address.sin_family = AF_INET;
+  server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+  server_address.sin_port = htons(atoi(argv[1]));
+
+  if (bind(serv_sock, (struct sockaddr*)&server_address,
+           sizeof(server_address)) == -1) {
+    error_handling("bind() error");
+  }
+
+  if (listen(serv_sock, 5) == -1) {
+    error_handling("listen() error");
+  }
+
+  while (1) {
+    struct sockaddr_in client_address;
+    socklen_t adr_sz = sizeof(client_address);
+
+    int clnt_sock =
+        accept(serv_sock, (struct sockaddr*)&client_address, &adr_sz);
+    if (clnt_sock == -1) {
+      continue;
+    }
+    puts("new client connected...");
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+      close(clnt_sock);
+      continue;
+    }
+
+    int strlen;
     char buf[BUF_SIZE];
 
-    if(argc != 2) {
-        printf("Usage : %s <port> \n", argv[0]);
-        exit(1);
+    /* child process */
+    if (pid == 0) {
+      close(serv_sock);
+      while ((strlen = read(clnt_sock, buf, BUF_SIZE)) != 0) {
+        write(clnt_sock, buf, strlen);
+      }
+
+      close(clnt_sock);
+      puts("client disconnected...");
+      return 0;
     }
 
-    act.sa_handler = read_childproc;
-    sigemptyset(&act.sa_mask);
-    act.sa_flags = 0;
-    state = sigaction(SIGCHLD, &act, 0);
+    /* parent process */
+    close(clnt_sock);
+  }
 
-    serv_sock = socket(PF_INET, SOCK_STREAM, 0);
-    memset(&serv_adr, 0, sizeof(serv_adr));
-    serv_adr.sin_family = AF_INET;
-    serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_adr.sin_port = htons(atoi(argv[1]));
-
-    if(bind(serv_sock, (struct sockaddr*) &serv_adr, sizeof(serv_adr)) == -1){
-        error_handling("bind() error");
-    }
-
-    if(listen(serv_sock, 5) == -1){
-        error_handling("listen() error");
-    }
-
-    while(1){
-        adr_sz = sizeof(clnt_adr);
-        clnt_sock = accept(serv_sock, (struct sockaddr*)&clnt_adr, &adr_sz);
-        if(clnt_sock == -1){
-            continue;
-        }
-        puts("new client connected...");
-        
-        pid = fork();
-        
-        if(pid == -1){
-            close(clnt_sock);
-            continue;
-        }
-
-        /* child process */
-        if(pid == 0){
-            close(serv_sock);
-            while((strlen = read(clnt_sock, buf, BUF_SIZE)) != 0){
-                write(clnt_sock, buf, strlen);
-            }
-
-            close(clnt_sock);
-            puts("client disconnected...");
-            return 0;
-        } 
-
-        /* parent process */
-        else{
-            close(clnt_sock);
-        }
-
-    }
-
-    close(serv_sock);
-    return 0;
+  close(serv_sock);
+  return 0;
 }
 
-void read_childproc(int sig){
-    pid_t pid;
-    int status;
-    pid = waitpid(-1, &status, WNOHANG);
-    printf("removed proc id: %d\n", pid);
+void read_child_proccess(int sig) {
+  pid_t pid;
+  int status;
+  pid = waitpid(-1, &status, WNOHANG);
+  printf("removed PID: %d\n", pid);
 }
 
-void error_handling(const char* msg){
-    fputs(msg, stderr);
-    fputc('\n', stderr);
-    exit(1);
+void error_handling(const char* msg) {
+  fputs(msg, stderr);
+  fputc('\n', stderr);
+  exit(1);
 }
